@@ -1,0 +1,1 @@
+console.log("Museu en format cub de 4 sales carregat correctament.");

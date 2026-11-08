@@ -1,0 +1,594 @@
+<!DOCTYPE html>
+<html lang="ca">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Museu Virtual 3D Interactiu</title>
+  
+  <!-- A-Frame Library -->
+  <script src="https://aframe.io/releases/1.4.2/aframe.min.js"></script>
+  <!-- Tailwind CSS per la interfície d'usuari (UI Overlay) -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- Phosphor Icons per icones nítides -->
+  <script src="https://unpkg.com/@phosphor-icons/web"></script>
+
+  <style>
+    /* Estils personalitzats per a la interfície sobreposada */
+    body {
+      margin: 0;
+      overflow: hidden;
+      font-family: 'Inter', sans-serif;
+      user-select: none;
+    }
+    
+    /* Transicions suaus per als panells de la interfície */
+    .glass-panel {
+      background: rgba(15, 23, 42, 0.85);
+      backdrop-filter: blur(12px);
+      border: 1px solid rgba(255, 255, 255, 0.15);
+    }
+    
+    .custom-scrollbar::-webkit-scrollbar {
+      width: 6px;
+    }
+    .custom-scrollbar::-webkit-scrollbar-track {
+      background: rgba(0, 0, 0, 0.2);
+      border-radius: 4px;
+    }
+    .custom-scrollbar::-webkit-scrollbar-thumb {
+      background: rgba(255, 255, 255, 0.3);
+      border-radius: 4px;
+    }
+    .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+      background: rgba(255, 255, 255, 0.5);
+    }
+
+    /* Animació de retard/pulsació per al punter reticle */
+    @keyframes pulse-ring {
+      0% { transform: scale(0.95); opacity: 0.8; }
+      50% { transform: scale(1.1); opacity: 0.4; }
+      100% { transform: scale(0.95); opacity: 0.8; }
+    }
+    .reticle-anim {
+      animation: pulse-ring 2s infinite ease-in-out;
+    }
+  </style>
+
+  <script>
+    // Component personalitzat d'A-Frame per al Zoom amb la Rodeta del Ratolí (Wheel Zoom)
+    AFRAME.registerComponent('wheel-zoom', {
+      schema: {
+        minFov: { type: 'number', default: 25 },  // Màxim zoom apropant
+        maxFov: { type: 'number', default: 80 },  // Màxim zoom allunyant (visió ampla)
+        speed: { type: 'number', default: 0.05 }   // Sensibilitat de la rodeta
+      },
+      init: function () {
+        this.onWheel = this.onWheel.bind(this);
+        window.addEventListener('wheel', this.onWheel, { passive: false });
+      },
+      remove: function () {
+        window.removeEventListener('wheel', this.onWheel);
+      },
+      onWheel: function (event) {
+        // Prevenir el desplaçament de la pàgina
+        event.preventDefault();
+
+        var camera = this.el.getAttribute('camera');
+        if (!camera) return;
+
+        let currentFov = camera.fov;
+        // Calcular nou Field of View (FOV)
+        let delta = event.deltaY * this.data.speed;
+        let newFov = currentFov + delta;
+
+        // Limitar el FOV entre els valors mínim i màxim
+        newFov = Math.max(this.data.minFov, Math.min(this.data.maxFov, newFov));
+
+        // Aplicar el nou FOV a la càmera
+        this.el.setAttribute('camera', 'fov', newFov);
+        
+        // Actualitzar l'indicador visual de zoom a la UI
+        if (window.updateZoomUI) {
+          window.updateZoomUI(newFov, this.data.minFov, this.data.maxFov);
+        }
+      }
+    });
+
+    // Component interactiu per activar informació de l'obra al clicar o mirar
+    AFRAME.registerComponent('artwork-info', {
+      schema: {
+        id: { type: 'string' },
+        title: { type: 'string' },
+        artist: { type: 'string' },
+        year: { type: 'string' },
+        room: { type: 'string' },
+        description: { type: 'string' },
+        audioGuide: { type: 'string' }
+      },
+      init: function () {
+        const data = this.data;
+        const el = this.el;
+
+        // Esdeveniment de clic/interacció
+        el.addEventListener('click', () => {
+          if (window.showArtworkModal) {
+            window.showArtworkModal(data);
+          }
+        });
+
+        // Efecte de focus/hover visual en el marc
+        el.addEventListener('mouseenter', () => {
+          el.setAttribute('scale', '1.03 1.03 1.03');
+        });
+        el.addEventListener('mouseleave', () => {
+          el.setAttribute('scale', '1 1 1');
+        });
+      }
+    });
+
+    // Component de teletransportació suau
+    AFRAME.registerComponent('teleport-node', {
+      schema: {
+        targetX: { type: 'number' },
+        targetZ: { type: 'number' },
+        roomName: { type: 'string' }
+      },
+      init: function () {
+        const el = this.el;
+        const data = this.data;
+
+        el.addEventListener('click', () => {
+          const cameraRig = document.querySelector('#cameraRig');
+          if (cameraRig) {
+            // Animar o moure la càmera a les coordenades del punt de teletransport
+            cameraRig.setAttribute('animation', {
+              property: 'position',
+              to: `${data.targetX} 0 ${data.targetZ}`,
+              dur: 800,
+              easing: 'easeInOutCubic'
+            });
+
+            // Notificar el canvi de sala a la UI
+            if (window.updateCurrentRoom) {
+              window.updateCurrentRoom(data.roomName);
+            }
+          }
+        });
+
+        // Animació de rotació del node de teletransportació
+        el.setAttribute('animation__rotate', {
+          property: 'rotation',
+          to: '0 360 0',
+          loop: true,
+          dur: 6000,
+          easing: 'linear'
+        });
+      }
+    });
+  </script>
+</head>
+<body class="bg-slate-950 text-slate-100 font-sans">
+
+  <!-- Escena 3D d'A-Frame -->
+  <a-scene embedded class="w-full h-screen" cursor="rayOrigin: mouse" raycaster="objects: .clickable">
+    
+    <!-- Carregador d'Actius i Textures -->
+    <a-assets timeout="10000">
+      <!-- Les 4 Imatges d'Art de GitHub/Wikimedia Commons -->
+      <img id="hokusai" src="https://raw.githubusercontent.com/aframevr/aframe/master/examples/boofunk/assets/ocean.jpg" crossorigin="anonymous" alt="Hokusai / La Gran Onada">
+      <!-- Utilitzem imatges públiques estables directes per als 4 mestres d'art -->
+      <img id="img-hokusai" src="https://upload.wikimedia.org/wikipedia/commons/thumb/a/a5/Tsunami_by_hokusai_19th_century.jpg/1280px-Tsunami_by_hokusai_19th_century.jpg" crossorigin="anonymous" alt="La gran onada de Kanagawa">
+      <img id="img-leonardo" src="https://raw.githubusercontent.com/eloigc/Musesus-uic/refs/heads/main/leonardo.jpg" crossorigin="anonymous" alt="Mona Lisa">
+      <img id="img-vangogh" src="https://upload.wikimedia.org/wikipedia/commons/thumb/e/ea/Van_Gogh_-_Starry_Night_-_Google_Art_Project.jpg/1280px-Van_Gogh_-_Starry_Night_-_Google_Art_Project.jpg" crossorigin="anonymous" alt="Nit Estelada">
+      <img id="img-klimt" src="https://raw.githubusercontent.com/eloigc/Musesus-uic/refs/heads/main/klimt.jpg?raw=true" crossorigin="anonymous" alt="El Petó">
+
+      <!-- Textures de Construcció i Ambient -->
+      <!-- Textura de taulell d'escacs per al terra -->
+      <img id="chess-texture" crossorigin="anonymous" src="https://images.unsplash.com/photo-1529699211952-734e80c4d42b?w=200&auto=format&fit=crop&q=60">
+      <img id="wall-texture" src="https://images.unsplash.com/photo-1589939705384-5185137a7f0f?q=80&w=1000&auto=format&fit=crop" crossorigin="anonymous">
+      <img id="marble-base" src="https://images.unsplash.com/photo-1618221195710-dd6b41faaea6?q=80&w=1000&auto=format&fit=crop" crossorigin="anonymous">
+    </a-assets>
+
+    <!-- Rig de Càmera i Punter Interactiu -->
+    <a-entity id="cameraRig" position="0 0 0">
+      <a-camera id="mainCamera" position="0 1.6 0" look-controls="pointerLockEnabled: false" wheel-zoom="minFov: 20; maxFov: 85; speed: 0.04" fov="60">
+        <!-- Reticle / Punter central per a la selecció 3D -->
+        <a-entity cursor="fuse: false"
+                  position="0 0 -1"
+                  geometry="primitive: ring; radiusInner: 0.008; radiusOuter: 0.014"
+                  material="color: #60a5fa; shader: flat; opacity: 0.7"
+                  raycaster="objects: .clickable">
+        </a-entity>
+      </a-camera>
+    </a-entity>
+
+    <!-- Il·luminació Global i Ambiental de la Galeria -->
+    <a-light type="ambient" color="#f8fafc" intensity="0.65"></a-light>
+    <a-light type="directional" position="0 10 0" intensity="0.3" color="#ffffff"></a-light>
+
+    <!-- ==================== ESTRUCTURA DEL MUSEU (4 SALES EN CUB) ==================== -->
+    <!--
+      Disposició de les Sales (Layout 2x2):
+      - Sala 1 (Nord-Oest, X: -7, Z: -7): Hokusai (Ukiyo-e)
+      - Sala 2 (Nord-Est, X: 7, Z: -7): Leonardo da Vinci (Renaixement)
+      - Sala 3 (Sud-Est, X: 7, Z: 7): Van Gogh (Postimpressionisme)
+      - Sala 4 (Sud-Oest, X: -7, Z: 7): Gustav Klimt (Modernisme/Art Nouveau)
+    -->
+
+    <!-- TERRA DEL MUSEU -->
+    <a-plane position="0 0 0" rotation="-90 0 0" width="30" height="30" material="src: #wood-floor; repeat: 10 10; roughness: 0.3"></a-plane>
+    <!-- SOSTRE DE LA GALERIA -->
+    <a-plane position="0 5 0" rotation="90 0 0" width="30" height="30" color="#1e293b" material="roughness: 0.9"></a-plane>
+
+    <!-- PERIMETRE DE PARETS EXTERIORS -->
+    <a-box position="0 2.5 -15" width="30" height="5" depth="0.4" color="#f1f5f9" material="roughness: 0.8"></a-box>
+    <a-box position="0 2.5 15" width="30" height="5" depth="0.4" color="#f1f5f9" material="roughness: 0.8"></a-box>
+    <a-box position="-15 2.5 0" width="0.4" height="5" depth="30" color="#f1f5f9" material="roughness: 0.8"></a-box>
+    <a-box position="15 2.5 0" width="0.4" height="5" depth="30" color="#f1f5f9" material="roughness: 0.8"></a-box>
+
+    <!-- PARETS DIVISIONÀRIES INTERIORS (DIVISIÓ EN 4 SALES AMB PORTES DE PAS) -->
+    <!-- Paret Central Nord-Sud (Eix Z) amb Porta Central -->
+    <a-box position="0 2.5 -9.5" width="0.4" height="5" depth="11" color="#e2e8f0"></a-box>
+    <a-box position="0 2.5 9.5" width="0.4" height="5" depth="11" color="#e2e8f0"></a-box>
+    <!-- Llinda de la porta central Nord-Sud -->
+    <a-box position="0 4.2 0" width="0.4" height="1.6" depth="8" color="#cbd5e1"></a-box>
+
+    <!-- Paret Central Est-Oest (Eix X) amb Porta Central -->
+    <a-box position="-9.5 2.5 0" width="11" height="5" depth="0.4" color="#e2e8f0"></a-box>
+    <a-box position="9.5 2.5 0" width="11" height="5" depth="0.4" color="#e2e8f0"></a-box>
+    <!-- Llinda de la porta central Est-Oest -->
+    <a-box position="0 4.2 0" width="8" height="1.6" depth="0.4" color="#cbd5e1"></a-box>
+
+
+    <!-- ==================== SALA 1: HOKUSAI (NORD-OEST: X: -7.5, Z: -7.5) ==================== -->
+    <a-entity id="room-hokusai">
+      <!-- Il·luminació Focal Spot per a l'obra -->
+      <a-light type="spot" position="-7.5 4 -12" target="#art-hokusai" intensity="1.2" angle="45" penumbra="0.3" color="#e0f2fe"></a-light>
+      
+      <!-- Cartell d'entrada de la Sala -->
+      <a-text value="SALA 1: HOKUSAI" position="-13.5 3.8 -7.5" rotation="0 90 0" width="6" color="#0369a1" align="center"></a-text>
+
+      <!-- MARCOS I OBRA D'ART: La Gran Onada -->
+      <a-entity id="art-hokusai" position="-7.5 2.3 -14.7" class="clickable"
+                artwork-info="id: hokusai; title: La gran onada de Kanagawa; artist: Katsushika Hokusai; year: 1831; room: Sala 1 - Ukiyo-e; description: Famosa xilografia del període Edo japonès. Mostra gegantesques onades amenaçant embarcacions amb el Mont Fuji al fons.; audioGuide: Obra mestra de l'art japonès gravada en fusta.">
+        <!-- Marc Daurat Elegants -->
+        <a-box position="0 0 -0.05" width="4.3" height="3.1" depth="0.1" color="#1e293b"></a-box>
+        <a-box position="0 0 -0.02" width="4.1" height="2.9" depth="0.08" color="#d97706"></a-box>
+        <!-- Imatge Principal -->
+        <a-plane width="3.8" height="2.6" position="0 0 0.04" material="src: #img-hokusai; shader: flat"></a-plane>
+      </a-entity>
+
+      <!-- CARTEL·LA INFORMATIVA DESPLEGABLE / LLETRER PARET -->
+      <a-entity position="-4.8 2.0 -14.7" class="clickable"
+                artwork-info="id: hokusai; title: La gran onada de Kanagawa; artist: Katsushika Hokusai; year: 1831; room: Sala 1 - Ukiyo-e; description: Premeu per veure la fitxa completa d'aquesta xilografia tradicional de la sèrie 36 vistes del Mont Fuji.">
+        <!-- Placa de Fons -->
+        <a-plane width="1.0" height="1.4" color="#0f172a" material="opacity: 0.9; transparent: true"></a-plane>
+        <!-- Marc exterior -->
+        <a-box width="1.04" height="1.44" depth="0.02" position="0 0 -0.01" color="#3b82f6"></a-box>
+        <!-- Text de la Cartel·la -->
+        <a-text value="K. Hokusai\n1831" position="0 0.4 0.02" width="2.2" color="#38bdf8" align="center" font="kelsonsans"></a-text>
+        <a-text value="La Gran Onada\nde Kanagawa\n\n[ Fes clic per ]\n[ mes informacio ]" position="0 -0.1 0.02" width="1.6" color="#f8fafc" align="center"></a-text>
+      </a-entity>
+
+      <!-- Node de Teletransportació Sala 1 -->
+      <a-cylinder position="-7.5 0.02 -7.5" radius="0.8" height="0.02" color="#0284c7" class="clickable"
+                  teleport-node="targetX: -7.5; targetZ: -7.5; roomName: Sala 1 (Hokusai)"
+                  material="opacity: 0.6; transparent: true">
+        <a-ring radius-inner="0.6" radius-outer="0.75" color="#38bdf8" position="0 0.02 0" rotation="-90 0 0"></a-ring>
+      </a-cylinder>
+    </a-entity>
+
+
+    <!-- ==================== SALA 2: LEONARDO DA VINCI (NORD-EST: X: 7.5, Z: -7.5) ==================== -->
+    <a-entity id="room-leonardo">
+      <!-- Il·luminació Focal Spot -->
+      <a-light type="spot" position="7.5 4 -12" target="#art-leonardo" intensity="1.2" angle="45" penumbra="0.3" color="#fef3c7"></a-light>
+      
+      <!-- Cartell de la Sala -->
+      <a-text value="SALA 2: LEONARDO DA VINCI" position="13.5 3.8 -7.5" rotation="0 -90 0" width="6" color="#b45309" align="center"></a-text>
+
+      <!-- MARCOS I OBRA D'ART: Mona Lisa -->
+      <a-entity id="art-leonardo" position="7.5 2.3 -14.7" class="clickable"
+                artwork-info="id: leonardo; title: Retrat de Lisa Gherardini (Mona Lisa); artist: Leonardo da Vinci; year: 1503-1519; room: Sala 2 - Renaixement; description: Retrat en oli sobre taula de xop. Coneguda pel seu somriure enigmàtic i la domini de la tècnica del sfumato.; audioGuide: L'obra més famosa del Museu del Louvre i de la història de l'art occidental.">
+        <!-- Marc Clàssic -->
+        <a-box position="0 0 -0.05" width="2.6" height="3.6" depth="0.1" color="#1e1b4b"></a-box>
+        <a-box position="0 0 -0.02" width="2.4" height="3.4" depth="0.08" color="#b45309"></a-box>
+        <!-- Imatge -->
+        <a-plane width="2.1" height="3.1" position="0 0 0.04" material="src: #img-leonardo; shader: flat"></a-plane>
+      </a-entity>
+
+      <!-- CARTEL·LA INFORMATIVA -->
+      <a-entity position="10.0 2.0 -14.7" class="clickable"
+                artwork-info="id: leonardo; title: Mona Lisa; artist: Leonardo da Vinci; year: 1503; room: Sala 2 - Renaixement; description: Feu clic per desplegar els detalls i la història de la Mona Lisa i el Renaixement Italià.">
+        <a-plane width="1.0" height="1.4" color="#0f172a" material="opacity: 0.9; transparent: true"></a-plane>
+        <a-box width="1.04" height="1.44" depth="0.02" position="0 0 -0.01" color="#f59e0b"></a-box>
+        <a-text value="L. da Vinci\n1503-1519" position="0 0.4 0.02" width="2.2" color="#fbbf24" align="center"></a-text>
+        <a-text value="Mona Lisa\n(La Gioconda)\n\n[ Fes clic per ]\n[ mes informacio ]" position="0 -0.1 0.02" width="1.6" color="#f8fafc" align="center"></a-text>
+      </a-entity>
+
+      <!-- Node de Teletransportació Sala 2 -->
+      <a-cylinder position="7.5 0.02 -7.5" radius="0.8" height="0.02" color="#d97706" class="clickable"
+                  teleport-node="targetX: 7.5; targetZ: -7.5; roomName: Sala 2 (Leonardo)"
+                  material="opacity: 0.6; transparent: true">
+        <a-ring radius-inner="0.6" radius-outer="0.75" color="#fbbf24" position="0 0.02 0" rotation="-90 0 0"></a-ring>
+      </a-cylinder>
+    </a-entity>
+
+
+    <!-- ==================== SALA 3: VAN GOGH (SUD-EST: X: 7.5, Z: 7.5) ==================== -->
+    <a-entity id="room-vangogh">
+      <!-- Il·luminació Focal Spot -->
+      <a-light type="spot" position="7.5 4 12" target="#art-vangogh" intensity="1.2" angle="45" penumbra="0.3" color="#fef08a"></a-light>
+      
+      <!-- Cartell de la Sala -->
+      <a-text value="SALA 3: VAN GOGH" position="13.5 3.8 7.5" rotation="0 -90 0" width="6" color="#ca8a04" align="center"></a-text>
+
+      <!-- MARCOS I OBRA D'ART: La Nit Estelada -->
+      <a-entity id="art-vangogh" position="7.5 2.3 14.7" rotation="0 180 0" class="clickable"
+                artwork-info="id: vangogh; title: La nit estelada; artist: Vincent van Gogh; year: 1889; room: Sala 3 - Postimpressionisme; description: Pintat des de la seva habitació a l'asil de Saint-Paul-de-Mausole a Saint-Rémy-de-Provence. Pincellades enèrgiques i remolins expressius.; audioGuide: Icona del postimpressionisme que expressa l'estat d'ànim i la visió nocturna de l'artista.">
+        <a-box position="0 0 -0.05" width="4.2" height="3.3" depth="0.1" color="#0f172a"></a-box>
+        <a-box position="0 0 -0.02" width="4.0" height="3.1" depth="0.08" color="#ca8a04"></a-box>
+        <a-plane width="3.7" height="2.8" position="0 0 0.04" material="src: #img-vangogh; shader: flat"></a-plane>
+      </a-entity>
+
+      <!-- CARTEL·LA INFORMATIVA -->
+      <a-entity position="4.8 2.0 14.7" rotation="0 180 0" class="clickable"
+                artwork-info="id: vangogh; title: La nit estelada; artist: Vincent van Gogh; year: 1889; room: Sala 3 - Postimpressionisme; description: Feu clic per obrir el panell de lectura sobre el significat del cel i la nit de Van Gogh.">
+        <a-plane width="1.0" height="1.4" color="#0f172a" material="opacity: 0.9; transparent: true"></a-plane>
+        <a-box width="1.04" height="1.44" depth="0.02" position="0 0 -0.01" color="#eab308"></a-box>
+        <a-text value="V. van Gogh\n1889" position="0 0.4 0.02" width="2.2" color="#fde047" align="center"></a-text>
+        <a-text value="La Nit Estelada\n\n[ Fes clic per ]\n[ mes informacio ]" position="0 -0.1 0.02" width="1.6" color="#f8fafc" align="center"></a-text>
+      </a-entity>
+
+      <!-- Node de Teletransportació Sala 3 -->
+      <a-cylinder position="7.5 0.02 7.5" radius="0.8" height="0.02" color="#ca8a04" class="clickable"
+                  teleport-node="targetX: 7.5; targetZ: 7.5; roomName: Sala 3 (Van Gogh)"
+                  material="opacity: 0.6; transparent: true">
+        <a-ring radius-inner="0.6" radius-outer="0.75" color="#fde047" position="0 0.02 0" rotation="-90 0 0"></a-ring>
+      </a-cylinder>
+    </a-entity>
+
+
+    <!-- ==================== SALA 4: GUSTAV KLIMT (SUD-OEST: X: -7.5, Z: 7.5) ==================== -->
+    <a-entity id="room-klimt">
+      <!-- Il·luminació Focal Spot -->
+      <a-light type="spot" position="-7.5 4 12" target="#art-klimt" intensity="1.2" angle="45" penumbra="0.3" color="#fef3c7"></a-light>
+      
+      <!-- Cartell de la Sala -->
+      <a-text value="SALA 4: GUSTAV KLIMT" position="-13.5 3.8 7.5" rotation="0 90 0" width="6" color="#854d0e" align="center"></a-text>
+
+      <!-- MARCOS I OBRA D'ART: El Petó -->
+      <a-entity id="art-klimt" position="-7.5 2.3 14.7" rotation="0 180 0" class="clickable"
+                artwork-info="id: klimt; title: El Petó (Der Kuss); artist: Gustav Klimt; year: 1907-1908; room: Sala 4 - Modernisme / Art Nouveau; description: Oli amb fulla d'or sobre tela. Culminació del 'període daurat' de Klimt amb formes geomètriques i dards d'erotisme i simbolisme.; audioGuide: Exposat al museu Österreichische Galerie Belvedere de Viena. Simbolitza la unió de l'amor.">
+        <a-box position="0 0 -0.05" width="3.3" height="3.3" depth="0.1" color="#1e1b4b"></a-box>
+        <a-box position="0 0 -0.02" width="3.1" height="3.1" depth="0.08" color="#a16207"></a-box>
+        <a-plane width="2.8" height="2.8" position="0 0 0.04" material="src: #img-klimt; shader: flat"></a-plane>
+      </a-entity>
+
+      <!-- CARTEL·LA INFORMATIVA -->
+      <a-entity position="-10.2 2.0 14.7" rotation="0 180 0" class="clickable"
+                artwork-info="id: klimt; title: El Petó; artist: Gustav Klimt; year: 1907; room: Sala 4 - Art Nouveau; description: Feu clic per conèixer els detalls sobre el període daurat de Gustav Klimt i l'Art Nouveau vienès.">
+        <a-plane width="1.0" height="1.4" color="#0f172a" material="opacity: 0.9; transparent: true"></a-plane>
+        <a-box width="1.04" height="1.44" depth="0.02" position="0 0 -0.01" color="#eab308"></a-box>
+        <a-text value="G. Klimt\n1907-1908" position="0 0.4 0.02" width="2.2" color="#fef08a" align="center"></a-text>
+        <a-text value="El Peto\n(Der Kuss)\n\n[ Fes clic per ]\n[ mes informacio ]" position="0 -0.1 0.02" width="1.6" color="#f8fafc" align="center"></a-text>
+      </a-entity>
+
+      <!-- Node de Teletransportació Sala 4 -->
+      <a-cylinder position="-7.5 0.02 7.5" radius="0.8" height="0.02" color="#854d0e" class="clickable"
+                  teleport-node="targetX: -7.5; targetZ: 7.5; roomName: Sala 4 (Klimt)"
+                  material="opacity: 0.6; transparent: true">
+        <a-ring radius-inner="0.6" radius-outer="0.75" color="#fef08a" position="0 0.02 0" rotation="-90 0 0"></a-ring>
+      </a-cylinder>
+    </a-entity>
+
+    <!-- Node de Teletransportació Central / Hall de distribució -->
+    <a-cylinder position="0 0.02 0" radius="1.1" height="0.02" color="#3b82f6" class="clickable"
+                teleport-node="targetX: 0; targetZ: 0; roomName: Hall Central"
+                material="opacity: 0.7; transparent: true">
+      <a-ring radius-inner="0.8" radius-outer="1.05" color="#93c5fd" position="0 0.02 0" rotation="-90 0 0"></a-ring>
+    </a-cylinder>
+
+  </a-scene>
+
+
+  <!-- ==================== INTERFÍCIE D'USUARI (UI OVERLAY) ==================== -->
+
+  <!-- Capçalera Superior / Títol del Museu -->
+  <header class="fixed top-4 left-4 right-4 md:left-8 md:right-8 pointer-events-none z-10 flex justify-between items-center">
+    <div class="glass-panel px-5 py-3 rounded-2xl shadow-2xl flex items-center gap-3 pointer-events-auto border border-white/10">
+      <div class="w-10 h-10 rounded-xl bg-gradient-to-tr from-blue-600 to-indigo-500 flex items-center justify-center text-white shadow-lg">
+        <i class="ph-bold ph-museum text-xl"></i>
+      </div>
+      <div>
+        <h1 class="text-base md:text-lg font-bold tracking-tight text-white">Museu Virtual 3D</h1>
+        <p class="text-xs text-slate-400 flex items-center gap-1.5">
+          <span class="inline-block w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+          <span id="current-room-text">Hall Central</span>
+        </p>
+      </div>
+    </div>
+
+    <!-- Indicador de Zoom amb la Rodeta -->
+    <div class="glass-panel px-4 py-2.5 rounded-2xl shadow-xl flex items-center gap-3 pointer-events-auto hidden sm:flex">
+      <i class="ph-bold ph-magnifying-glass-plus text-sky-400 text-lg"></i>
+      <div class="text-xs">
+        <span class="text-slate-400 block">Zoom Rodeta (Wheel)</span>
+        <span id="zoom-level-indicator" class="font-semibold text-slate-200">FOV: 60° (Nivel 100%)</span>
+      </div>
+    </div>
+  </header>
+
+  <!-- Panell de Control i Guia Ràpida (Costat Dret) -->
+  <aside class="fixed right-4 top-24 z-10 hidden md:block w-64 glass-panel p-4 rounded-2xl text-xs space-y-3">
+    <h2 class="font-bold text-slate-200 flex items-center gap-2 text-sm border-b border-slate-700/60 pb-2">
+      <i class="ph-bold ph-game-controller text-blue-400 text-lg"></i> Controls de Navegació
+    </h2>
+    <ul class="space-y-2 text-slate-300">
+      <li class="flex justify-between items-center">
+        <span>Desplaçament:</span>
+        <kbd class="px-2 py-1 bg-slate-800 border border-slate-700 rounded text-slate-200 font-mono">W A S D</kbd>
+      </li>
+      <li class="flex justify-between items-center">
+        <span>Vista 360°:</span>
+        <span class="text-slate-400">Arrossega el ratolí</span>
+      </li>
+      <li class="flex justify-between items-center">
+        <span class="font-semibold text-sky-400">Apropar / Allunyar:</span>
+        <kbd class="px-2 py-1 bg-sky-950 border border-sky-800 text-sky-300 rounded font-mono">Rodeta Ratolí</kbd>
+      </li>
+      <li class="flex justify-between items-center">
+        <span>Teleport:</span>
+        <span class="text-slate-400">Clic als cercles blaus</span>
+      </li>
+      <li class="flex justify-between items-center">
+        <span>Obres i Cartel·les:</span>
+        <span class="text-slate-400">Clic per detall</span>
+      </li>
+    </ul>
+  </aside>
+
+  <!-- Botons de Teleportació Ràpida (Navegació Directa a Baix) -->
+  <nav class="fixed bottom-6 left-1/2 -translate-x-1/2 z-10 glass-panel p-2 rounded-2xl shadow-2xl flex items-center gap-1.5 md:gap-2 max-w-[95vw] overflow-x-auto">
+    <button onclick="teleportTo(0, 0, 'Hall Central')" class="px-3 py-2 rounded-xl text-xs font-medium bg-slate-800/80 hover:bg-blue-600 text-slate-200 hover:text-white transition-all flex items-center gap-1.5 whitespace-nowrap">
+      <i class="ph-bold ph-compass"></i> Central
+    </button>
+    <button onclick="teleportTo(-7.5, -7.5, 'Sala 1 (Hokusai)')" class="px-3 py-2 rounded-xl text-xs font-medium bg-slate-800/80 hover:bg-sky-600 text-slate-200 hover:text-white transition-all flex items-center gap-1.5 whitespace-nowrap">
+      <i class="ph-bold ph-waves"></i> Sala 1: Hokusai
+    </button>
+    <button onclick="teleportTo(7.5, -7.5, 'Sala 2 (Leonardo)')" class="px-3 py-2 rounded-xl text-xs font-medium bg-slate-800/80 hover:bg-amber-600 text-slate-200 hover:text-white transition-all flex items-center gap-1.5 whitespace-nowrap">
+      <i class="ph-bold ph-paint-brush"></i> Sala 2: Leonardo
+    </button>
+    <button onclick="teleportTo(7.5, 7.5, 'Sala 3 (Van Gogh)')" class="px-3 py-2 rounded-xl text-xs font-medium bg-slate-800/80 hover:bg-yellow-600 text-slate-200 hover:text-white transition-all flex items-center gap-1.5 whitespace-nowrap">
+      <i class="ph-bold ph-star-of-david"></i> Sala 3: Van Gogh
+    </button>
+    <button onclick="teleportTo(-7.5, 7.5, 'Sala 4 (Klimt)')" class="px-3 py-2 rounded-xl text-xs font-medium bg-slate-800/80 hover:bg-yellow-700 text-slate-200 hover:text-white transition-all flex items-center gap-1.5 whitespace-nowrap">
+      <i class="ph-bold ph-heart"></i> Sala 4: Klimt
+    </button>
+  </nav>
+
+  <!-- ==================== MODAL / CARTEL·LA DESPLEGABLE D'INFORMACIÓ ==================== -->
+  <div id="artwork-modal" class="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-md hidden flex items-center justify-center p-4 transition-all duration-300 opacity-0">
+    <div class="glass-panel max-w-xl w-full rounded-3xl p-6 md:p-8 shadow-2xl relative border border-white/20 transform scale-95 transition-all duration-300" id="modal-container">
+      
+      <!-- Botó de tancar modal -->
+      <button onclick="closeArtworkModal()" class="absolute top-5 right-5 w-9 h-9 rounded-full bg-slate-800 hover:bg-slate-700 text-slate-300 flex items-center justify-center transition-colors">
+        <i class="ph-bold ph-x text-lg"></i>
+      </button>
+
+      <!-- Contingut de la Cartel·la -->
+      <div class="space-y-4">
+        <div class="inline-block px-3 py-1 rounded-full bg-blue-500/20 text-blue-300 text-xs font-semibold uppercase tracking-wider" id="modal-room">
+          Sala 1 - Ukiyo-e
+        </div>
+
+        <div>
+          <h2 class="text-2xl font-bold text-white tracking-tight" id="modal-title">La Gran Onada de Kanagawa</h2>
+          <p class="text-sm text-sky-400 font-medium mt-0.5" id="modal-artist-year">Katsushika Hokusai, 1831</p>
+        </div>
+
+        <div class="border-t border-slate-700/60 pt-4">
+          <h3 class="text-xs font-bold uppercase tracking-wider text-slate-400 mb-1">Descripció i Context Històric</h3>
+          <p class="text-sm text-slate-300 leading-relaxed custom-scrollbar max-h-40 overflow-y-auto pr-2" id="modal-description">
+            Carregant informació detallada...
+          </p>
+        </div>
+
+        <div class="bg-slate-900/60 rounded-2xl p-4 border border-slate-800 flex items-start gap-3">
+          <i class="ph-bold ph-headphones text-sky-400 text-2xl shrink-0 mt-0.5"></i>
+          <div>
+            <h4 class="text-xs font-bold text-slate-200">Audioguia destacada</h4>
+            <p class="text-xs text-slate-400 mt-0.5" id="modal-audioguide">
+              Informació complementària sobre la tècnica i impacte en l'art modern.
+            </p>
+          </div>
+        </div>
+
+        <div class="pt-2 flex justify-end">
+          <button onclick="closeArtworkModal()" class="w-full sm:w-auto px-6 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-sm font-semibold transition-all shadow-lg shadow-blue-600/30">
+            Continuar la visita
+          </button>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+
+  <!-- ==================== JAVASCRIPT DE CONTROL I INTERACCIÓ ==================== -->
+  <script>
+    // Fons d'imatges d'art per a les cartel·les
+    const artworkImages = {
+      hokusai: "https://upload.wikimedia.org/wikipedia/commons/thumb/a/a5/Tsunami_by_hokusai_19th_century.jpg/1280px-Tsunami_by_hokusai_19th_century.jpg",
+      leonardo: "https://upload.wikimedia.org/wikipedia/commons/thumb/e/ec/Mona_Lisa%2C_by_Leonardo_da_Vinci%2C_from_C2RMF_retouched.jpg/800px-Mona_Lisa%2C_by_Leonardo_da_Vinci%2C_from_C2RMF_retouched.jpg",
+      vangogh: "https://upload.wikimedia.org/wikipedia/commons/thumb/e/ea/Van_Gogh_-_Starry_Night_-_Google_Art_Project.jpg/1280px-Van_Gogh_-_Starry_Night_-_Google_Art_Project.jpg",
+      klimt: "https://upload.wikimedia.org/wikipedia/commons/thumb/4/40/The_Kiss_-_Gustav_Klimt_-_Google_Cultural_Institute.jpg/1024px-The_Kiss_-_Gustav_Klimt_-_Google_Cultural_Institute.jpg"
+    };
+
+    // Actualitzar l'indicador de zoom de la interfície d'usuari
+    window.updateZoomUI = function(currentFov, minFov, maxFov) {
+      const zoomIndicator = document.getElementById('zoom-level-indicator');
+      if (!zoomIndicator) return;
+      
+      // Convertir el FOV a un percentatge intuïtiu (menys FOV = més zoom)
+      const zoomPercent = Math.round(((maxFov - currentFov) / (maxFov - minFov)) * 100);
+      zoomIndicator.textContent = `FOV: ${Math.round(currentFov)}° (Zoom: ${zoomPercent}%)`;
+    };
+
+    // Mostrar el modal desplegable amb la cartel·la informativa
+    window.showArtworkModal = function(data) {
+      const modal = document.getElementById('artwork-modal');
+      const container = document.getElementById('modal-container');
+      
+      document.getElementById('modal-title').textContent = data.title;
+      document.getElementById('modal-artist-year').textContent = `${data.artist} (${data.year})`;
+      document.getElementById('modal-room').textContent = data.room;
+      document.getElementById('modal-description').textContent = data.description;
+      document.getElementById('modal-audioguide').textContent = data.audioGuide || "Audioguia disponible en català.";
+
+      modal.classList.remove('hidden');
+      setTimeout(() => {
+        modal.classList.remove('opacity-0');
+        container.classList.remove('scale-95');
+      }, 10);
+    };
+
+    // Tancar el modal
+    function closeArtworkModal() {
+      const modal = document.getElementById('artwork-modal');
+      const container = document.getElementById('modal-container');
+      
+      modal.classList.add('opacity-0');
+      container.classList.add('scale-95');
+      setTimeout(() => {
+        modal.classList.add('hidden');
+      }, 300);
+    }
+
+    // Actualitzar el text de la sala actual
+    window.updateCurrentRoom = function(roomName) {
+      const text = document.getElementById('current-room-text');
+      if (text) text.textContent = roomName;
+    };
+
+    // Funció de teletransportació ràpida
+    function teleportTo(x, z, roomName) {
+      const cameraRig = document.querySelector('#cameraRig');
+      if (cameraRig) {
+        cameraRig.setAttribute('animation', {
+          property: 'position',
+          to: `${x} 0 ${z}`,
+          dur: 800,
+          easing: 'easeInOutCubic'
+        });
+        window.updateCurrentRoom(roomName);
+      }
+    }
+
+    // Tancar modal en prémer la tecla ESC
+    window.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') closeArtworkModal();
+    });
+  </script>
+</body>
+</html>

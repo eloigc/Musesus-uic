@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html lang="ca">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Museu Virtual 3D Interactiu</title>
+  
+  <!-- Llibreries externes: A-Frame 3D, Tailwind CSS i Phosphor Icons -->
+  <script src="https://aframe.io/releases/1.4.2/aframe.min.js"></script>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://unpkg.com/@phosphor-icons/web"></script>
+
+  <!-- Enllaç al CSS personalitzat -->
+  <link rel="stylesheet" href="style.css">
+</head>
+<body class="bg-slate-950 text-slate-100 font-sans overflow-hidden">
+
+  <!-- Contenidor Principal que permet la Pantalla Completa sense ocultar la Modal -->
+  <div id="app-container" class="relative w-full h-screen overflow-hidden bg-slate-950">
+
+    <!-- Escena 3D d'A-Frame (amb VR UI desactivat per no ocultar la interfície HTML) -->
+    <a-scene embedded vr-mode-ui="enabled: false" class="w-full h-screen" cursor="rayOrigin: mouse" raycaster="objects: .clickable; interval: 100">
+      
+      <a-assets timeout="20000">
+        <!-- Obres d'Art des de GitHub amb permisos CORS -->
+        <img id="img-hokusai" src="https://raw.githubusercontent.com/eloigc/Musesus-uic/refs/heads/main/hokusai.jpg" crossorigin="anonymous">
+        <img id="img-leonardo" src="https://raw.githubusercontent.com/eloigc/Musesus-uic/refs/heads/main/leonardo.jpg" crossorigin="anonymous">
+        <img id="img-vangogh" src="https://raw.githubusercontent.com/eloigc/Musesus-uic/refs/heads/main/vangogh.jpg" crossorigin="anonymous">
+        <img id="img-klimt" src="https://raw.githubusercontent.com/eloigc/Musesus-uic/refs/heads/main/klimt.jpg?raw=true" crossorigin="anonymous">
+        
+        <!-- Textures del terra, parets i cel des de GitHub -->
+        <img id="floor-texture" src="https://raw.githubusercontent.com/eloigc/Musesus-uic/main/terra/interior_tiles_diff_2k.jpg" crossorigin="anonymous">
+        <img id="wall-texture" src="https://raw.githubusercontent.com/eloigc/Musesus-uic/main/paret/coated_pine_diff_2k.jpg" crossorigin="anonymous">
+        <img id="sky-texture" src="https://raw.githubusercontent.com/eloigc/Musesus-uic/main/cel/citrus_orchard_road_puresky_2k.jpg" crossorigin="anonymous">
+      </a-assets>
+
+      <!-- Càmera, Navegació WASD i Zoom de rodeta -->
+      <a-entity id="cameraRig" position="0 0 0">
+        <a-camera id="mainCamera" position="0 1.6 0" look-controls="pointerLockEnabled: false" wasd-controls wheel-zoom="minFov: 20; maxFov: 85; speed: 0.04" fov="60"></a-camera>
+      </a-entity>
+
+      <!-- Il·luminació Global de la Galeria -->
+      <a-light type="ambient" color="#ffffff" intensity="1.2"></a-light>
+      <a-light type="directional" position="5 10 5" intensity="0.6" color="#ffffff"></a-light>
+
+      <!-- Cel Panoràmic 360° amb color blavós de reserva si la imatge triga o falla -->
+      <a-sky src="#sky-texture" color="#7dd3fc" material="shader: flat"></a-sky>
+
+      <!-- Arquitectura: Terra amb enrajolat i Sostre obert al cel -->
+      <a-plane position="0 0 0" rotation="-90 0 0" width="30" height="30" material="src: #floor-texture; color: #ffffff; repeat: 8 8; side: double"></a-plane>
+
+      <!-- PARETS EXTERIORS I DIVISIONÀRIES INTERIORS AMB TEXTURA DE FUSTA -->
+      <a-box position="0 2.5 -15" width="30" height="5" depth="0.4" material="src: #wall-texture; color: #ffffff; repeat: 6 1; side: double"></a-box>
+      <a-box position="0 2.5 15" width="30" height="5" depth="0.4" material="src: #wall-texture; color: #ffffff; repeat: 6 1; side: double"></a-box>
+      <a-box position="-15 2.5 0" width="0.4" height="5" depth="30" material="src: #wall-texture; color: #ffffff; repeat: 6 1; side: double"></a-box>
+      <a-box position="15 2.5 0" width="0.4" height="5" depth="30" material="src: #wall-texture; color: #ffffff; repeat: 6 1; side: double"></a-box>
+      <a-box position="0 2.5 -9.5" width="0.4" height="5" depth="11" material="src: #wall-texture; color: #ffffff; repeat: 2 1; side: double"></a-box>
+      <a-box position="0 2.5 9.5" width="0.4" height="5" depth="11" material="src: #wall-texture; color: #ffffff; repeat: 2 1; side: double"></a-box>
+
+      <!-- SALA 1: HOKUSAI (Nord-Oest: X: -7.5, Z: -7.5) -->
+      <a-entity position="-7.5 0 -7.5">
+        <a-image src="#img-hokusai" position="0 2.3 -7.2" width="3.8" height="2.6" class="clickable" onclick="openArtwork('hokusai')"></a-image>
+        <a-cylinder position="0 0.02 0" radius="0.8" height="0.02" color="#0284c7" class="clickable" onclick="teleportTo(-7.5, -7.5, 'Sala 1 (Hokusai)')"></a-cylinder>
+      </a-entity>
+
+      <!-- SALA 2: LEONARDO DA VINCI (Nord-Est: X: 7.5, Z: -7.5) -->
+      <a-entity position="7.5 0 -7.5">
+        <a-image src="#img-leonardo" position="0 2.3 -7.2" width="2.1" height="3.1" class="clickable" onclick="openArtwork('leonardo')"></a-image>
+        <a-cylinder position="0 0.02 0" radius="0.8" height="0.02" color="#d97706" class="clickable" onclick="teleportTo(7.5, -7.5, 'Sala 2 (Leonardo)')"></a-cylinder>
+      </a-entity>
+
+      <!-- SALA 3: VAN GOGH (Sud-Est: X: 7.5, Z: 7.5) -->
+      <a-entity position="7.5 0 7.5">
+        <a-image src="#img-vangogh" position="0 2.3 7.2" rotation="0 180 0" width="3.7" height="2.8" class="clickable" onclick="openArtwork('vangogh')"></a-image>
+        <a-cylinder position="0 0.02 0" radius="0.8" height="0.02" color="#ca8a04" class="clickable" onclick="teleportTo(7.5, 7.5, 'Sala 3 (Van Gogh)')"></a-cylinder>
+      </a-entity>
+
+      <!-- SALA 4: GUSTAV KLIMT (Sud-Oest: X: -7.5, Z: 7.5) -->
+      <a-entity position="-7.5 0 7.5">
+        <a-image src="#img-klimt" position="0 2.3 7.2" rotation="0 180 0" width="2.8" height="2.8" class="clickable" onclick="openArtwork('klimt')"></a-image>
+        <a-cylinder position="0 0.02 0" radius="0.8" height="0.02" color="#854d0e" class="clickable" onclick="teleportTo(-7.5, 7.5, 'Sala 4 (Klimt)')"></a-cylinder>
+      </a-entity>
+
+      <!-- Hall Central Teleport Node -->
+      <a-cylinder position="0 0.02 0" radius="1.1" height="0.02" color="#3b82f6" class="clickable" onclick="teleportTo(0, 0, 'Hall Central')"></a-cylinder>
+
+    </a-scene>
+
+    <!-- INTERFÍCIE SOBREPOSADA (HUD) DINS DEL CONTENIDOR PRINCIPAL -->
+    <header class="fixed top-4 left-4 right-4 pointer-events-none z-30 flex justify-between items-center">
+      <div class="glass-panel px-5 py-3 rounded-2xl shadow-2xl flex items-center gap-3 pointer-events-auto">
+        <div class="w-10 h-10 rounded-xl bg-gradient-to-tr from-blue-600 to-indigo-500 flex items-center justify-center text-white shadow-lg">
+          <i class="ph-bold ph-museum text-xl"></i>
+        </div>
+        <div>
+          <h1 class="text-base font-bold tracking-tight text-white">Museu Virtual 3D</h1>
+          <p class="text-xs text-slate-400 flex items-center gap-1.5">
+            <span class="inline-block w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+            <span id="current-room-text">Hall Central</span>
+          </p>
+        </div>
+      </div>
+
+      <div class="flex items-center gap-3 pointer-events-auto">
+        <div class="glass-panel px-4 py-2.5 rounded-2xl shadow-xl flex items-center gap-3 hidden sm:flex">
+          <i class="ph-bold ph-magnifying-glass-plus text-sky-400 text-lg"></i>
+          <div class="text-xs">
+            <span class="text-slate-400 block">Zoom Rodeta</span>
+            <span id="zoom-level-indicator" class="font-semibold text-slate-200">FOV: 60°</span>
+          </div>
+        </div>
+
+        <!-- Botó de Pantalla Completa Personalitzat -->
+        <button onclick="toggleFullscreen()" class="glass-panel px-4 py-2.5 rounded-2xl shadow-xl flex items-center gap-2 hover:bg-slate-800/90 text-white transition-all text-xs font-semibold">
+          <i class="ph-bold ph-arrows-out-simple text-base text-sky-400"></i>
+          <span class="hidden md:inline">Pantalla Completa</span>
+        </button>
+      </div>
+    </header>
+
+    <!-- Botons de Teleportació Ràpida (A Baix) -->
+    <nav class="fixed bottom-6 left-1/2 -translate-x-1/2 z-30 glass-panel p-2 rounded-2xl shadow-2xl flex items-center gap-2 max-w-[95vw] overflow-x-auto pointer-events-auto">
+      <button onclick="teleportTo(0, 0, 'Hall Central')" class="px-3 py-2 rounded-xl text-xs font-medium bg-slate-800/80 hover:bg-blue-600 text-slate-200 transition-all flex items-center gap-1.5 whitespace-nowrap">
+        <i class="ph-bold ph-compass"></i> Central
+      </button>
+      <button onclick="teleportTo(-7.5, -7.5, 'Sala 1 (Hokusai)')" class="px-3 py-2 rounded-xl text-xs font-medium bg-slate-800/80 hover:bg-sky-600 text-slate-200 transition-all flex items-center gap-1.5 whitespace-nowrap">
+        <i class="ph-bold ph-waves"></i> Sala 1: Hokusai
+      </button>
+      <button onclick="teleportTo(7.5, -7.5, 'Sala 2 (Leonardo)')" class="px-3 py-2 rounded-xl text-xs font-medium bg-slate-800/80 hover:bg-amber-600 text-slate-200 transition-all flex items-center gap-1.5 whitespace-nowrap">
+        <i class="ph-bold ph-paint-brush"></i> Sala 2: Leonardo
+      </button>
+      <button onclick="teleportTo(7.5, 7.5, 'Sala 3 (Van Gogh)')" class="px-3 py-2 rounded-xl text-xs font-medium bg-slate-800/80 hover:bg-yellow-600 text-slate-200 transition-all flex items-center gap-1.5 whitespace-nowrap">
+        <i class="ph-bold ph-star-of-david"></i> Sala 3: Van Gogh
+      </button>
+      <button onclick="teleportTo(-7.5, 7.5, 'Sala 4 (Klimt)')" class="px-3 py-2 rounded-xl text-xs font-medium bg-slate-800/80 hover:bg-yellow-700 text-slate-200 transition-all flex items-center gap-1.5 whitespace-nowrap">
+        <i class="ph-bold ph-heart"></i> Sala 4: Klimt
+      </button>
+    </nav>
+
+    <!-- FINESTRA MODAL D'INFORMACIÓ I AUDIOGUIA PER VEU (Z-INDEX ALT PER A PANTALLA COMPLETA) -->
+    <div id="artwork-modal" class="fixed inset-0 z-[9999] bg-slate-950/80 backdrop-blur-md hidden flex items-center justify-center p-4 pointer-events-auto">
+      <div class="glass-panel max-w-xl w-full rounded-3xl p-6 md:p-8 shadow-2xl relative border border-slate-700/80">
+        <button onclick="closeArtworkModal()" class="absolute top-5 right-5 w-9 h-9 rounded-full bg-slate-800 hover:bg-slate-700 text-slate-300 flex items-center justify-center text-sm font-bold">✕</button>
+        <div id="modal-room" class="inline-block px-3 py-1 rounded-full bg-blue-500/20 text-blue-300 text-xs font-semibold uppercase tracking-wider mb-2"></div>
+        <h2 id="modal-title" class="text-2xl font-bold text-white tracking-tight"></h2>
+        <p id="modal-artist-year" class="text-sm text-sky-400 font-medium mt-0.5 mb-4"></p>
+        
+        <div class="border-t border-slate-800 pt-3 mb-6">
+          <h3 class="text-xs font-bold uppercase tracking-wider text-slate-400 mb-1">Context Històric (Lectura Fàcil)</h3>
+          <p id="modal-description" class="text-sm text-slate-300 leading-relaxed custom-scrollbar max-h-40 overflow-y-auto pr-2"></p>
+        </div>
+        
+        <!-- Secció d'Audioguia per Veu -->
+        <div class="bg-slate-950/60 rounded-2xl p-4 border border-slate-800 flex items-center justify-between gap-3">
+          <div>
+            <h4 class="text-xs font-bold text-slate-200">Audioguia en Lectura Fàcil</h4>
+            <p class="text-xs text-slate-400 mt-0.5">Prem el botó per escoltar la locutació en català.</p>
+          </div>
+          <button onclick="reproduirAudioguia(currentAudioText)" class="px-4 py-2 rounded-xl bg-sky-600 hover:bg-sky-500 text-white text-xs font-bold flex items-center gap-2 shadow-md shrink-0">
+            <i class="ph-bold ph-speaker-high text-base"></i>
+            <span>Escoltar</span>
+          </button>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- Enllaç al fitxer JavaScript extern -->
+  <script src="script.js"></script>
+</body>
+</html>
